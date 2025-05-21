@@ -1,0 +1,10 @@
+ml_env
+ml_env\
+saved_models/
+saved_models\
+seq2seq_summarizer_model/
+seq2seq_summarizer_model\
+__pycache__/
+logs/
+*.csv
+generated_summaries/
