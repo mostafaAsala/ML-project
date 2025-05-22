@@ -300,14 +300,11 @@ results = db.search("space exploration adventure", k=5)
 | 4. The Fox and the Hound (0.76 similarity) |
 | 5. Good Will Hunting (0.74 similarity) |
 
-![Search Interface](placeholder_images/search_interface.png)
-<!-- Image should show a user interface for the search functionality, with a search box, filters, and results displayed with similarity scores and movie details -->
-
 ### Vector Embedding Visualization
 
 The system includes visualization of movie embeddings to understand genre clustering:
 
-![Vector Embeddings](placeholder_images/vector_embeddings.png)
+![Vector Embeddings](visualizations\moveiEmbed_ed.png)
 <!-- Image should show a 2D or 3D visualization of movie embeddings using t-SNE or UMAP, with points colored by genre to show how similar movies cluster together -->
 
 ## Future Enhancements

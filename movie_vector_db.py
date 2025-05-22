@@ -230,6 +230,9 @@ class MovieVectorDB:
         
         with open(os.path.join(path, "metadata.pkl"), "wb") as f:
             pickle.dump(metadata, f)
+            
+        with open(os.path.join(path, "embeddings.pkl"), "wb") as f:
+            pickle.dump(self.embeddings, f)
         
         print(f"Vector database saved to {path}")
         return path
@@ -257,6 +260,8 @@ class MovieVectorDB:
             # Load metadata
             with open(os.path.join(path, "metadata.pkl"), "rb") as f:
                 metadata = pickle.load(f)
+            with open(os.path.join(path, "embeddings.pkl"), "rb") as f:
+                self.embeddings = pickle.load(f)
             
             self.model_name = metadata["model_name"]
             self.movie_ids = metadata["movie_ids"]
