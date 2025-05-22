@@ -184,7 +184,7 @@ class MovieVectorVisualizer:
         hover_data = ['title']
         if 'year' in plot_df.columns:
             hover_data.append('year')
-
+        plot_df = plot_df.explode('genre')
         if 'genre' in plot_df.columns:
             # Color by genre
             fig = px.scatter(
@@ -243,7 +243,7 @@ class MovieVectorVisualizer:
             plot_df['genre'] = self.movies_df['primary_genre']
         elif 'genre' in self.movies_df.columns:
             plot_df['genre'] = self.movies_df['genre']
-
+        plot_df = plot_df.explode('genre')
         # Create interactive 3D plot with Plotly
         hover_data = ['title']
         if 'year' in plot_df.columns:
@@ -296,9 +296,9 @@ class MovieVectorVisualizer:
 
         # Use primary_genre if available, otherwise use genre
         genre_col = 'primary_genre' if 'primary_genre' in self.movies_df.columns else 'genre'
-
+        df = self.movies_df.explode(genre_col)
         # Count genres
-        genre_counts = self.movies_df[genre_col].value_counts()
+        genre_counts = df[genre_col].value_counts()
 
         # Filter to top 20 genres if there are too many
         if len(genre_counts) > 20:
