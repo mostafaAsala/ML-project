@@ -443,8 +443,8 @@ def main():
 
     # Try to load existing database
     success = db.load()
-    
-    if not success and args.create_db:
+
+    if not success or args.create_db:
         print(f"Creating vector database from {args.data}...")
         db.load_data(args.data, data_source=args.source)
         db.preprocess_data()

@@ -13,6 +13,7 @@ The implementation uses sentence-transformers for embeddings and FAISS for effic
 import os
 import json
 import pickle
+import re
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Union, Tuple, Optional, Any
@@ -73,7 +74,62 @@ class MovieVectorDB:
             })
             # Convert year to numeric
             df['year'] = pd.to_numeric(df['year'], errors='coerce')
-            
+            # Convert genre to list
+
+                        # Define all known genres and their aliases
+            known_genres = {
+                'action': ['action'],
+                'adventure': ['adventure'],
+                'animation': ['animation', 'animated'],
+                'biography': ['biography', 'bio'],
+                'comedy': ['comedy', 'comedies'],
+                'crime': ['crime'],
+                'documentary': ['documentary', 'doc'],
+                'drama': ['drama'],
+                'family': ['family'],
+                'fantasy': ['fantasy'],
+                'history': ['history', 'historical'],
+                'horror': ['horror'],
+                'music': ['music', 'musical', 'musicals'],
+                'mystery': ['mystery'],
+                'romance': ['romance', 'romantic'],
+                'sci-fi': ['sci-fi', 'science fiction', 'scifi', 'science-fiction'],
+                'sport': ['sport', 'sports'],
+                'thriller': ['thriller'],
+                'war': ['war'],
+                'western': ['western'],
+                'unknown': ['unknown']
+            }
+
+            # Create a mapping from alias to canonical genre
+            alias_to_genre = {}
+            for genre, aliases in known_genres.items():
+                for alias in aliases:
+                    alias_to_genre[alias.lower()] = genre
+
+            def extract_genres_from_string(genre_str):
+                if not isinstance(genre_str, str):
+                    return ['unknown']
+                # Lowercase and split by comma or slash or semicolon
+                tokens = re.split(r'[,/;]', genre_str.lower())
+                genres_found = set()
+                for token in tokens:
+                    token = token.strip()
+                    if token in alias_to_genre:
+                        genres_found.add(alias_to_genre[token])
+                    else:
+                        # Try partial match for multi-word genres
+                        for alias, genre in alias_to_genre.items():
+                            if alias in token:
+                                genres_found.add(genre)
+                if not genres_found:
+                    return ['unknown']
+                return list(genres_found)
+
+            # Apply to the 'Genre' column to create a clean genre list
+            df['genre'] = df['genre'].apply(extract_genres_from_string)
+
+
         elif data_source == "tmdb":
             # Load TMDB data
             df = pd.read_csv(file_path)
@@ -230,7 +286,7 @@ class MovieVectorDB:
         
         with open(os.path.join(path, "metadata.pkl"), "wb") as f:
             pickle.dump(metadata, f)
-            
+
         with open(os.path.join(path, "embeddings.pkl"), "wb") as f:
             pickle.dump(self.embeddings, f)
         
