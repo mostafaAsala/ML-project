@@ -33,7 +33,7 @@ The project begins with comprehensive data exploration focusing on movie metadat
 - **Time Period**: Movies from 1900s to present day
 - **Features**: Title, Release Year, Origin/Ethnicity, Director, Cast, Genre, Plot
 
-![Genre Distribution](Images\genre_distribution.png)
+![Genre Distribution](Images/genre_distribution.png)
 <!-- Image should show a bar chart or pie chart of the distribution of genres in the dataset, highlighting the most common and rare genres -->
 
 ### TMDB Dataset Analysis
@@ -43,7 +43,7 @@ The project incorporates additional data from TMDB API to enrich the analysis:
 - **Actor and Director Networks**: Analysis of collaborations and popularity
 - **Gender Distribution**: Analysis of gender representation in movies
 
-![Gender Distribution](Images\gender_distribution.png)
+![Gender Distribution](Images/gender_distribution.png)
 <!-- Image should show the gender distribution of actors and directors over time, possibly as a stacked area chart showing how representation has changed -->
 
 ### Key Insights
@@ -51,13 +51,13 @@ The project incorporates additional data from TMDB API to enrich the analysis:
 - Genre behavior varies significantly across countries and time periods
 
 
-![country by Genre](Images\genre_vs_country.png)
+![country by Genre](Images/genre_vs_country.png)
 <!-- Image should show a box plot or bar chart comparing average budgets across different genres, possibly with a time dimension to show how budgets have changed over decades -->
 
 - Strong correlation between certain directors and specific genres
 
-![direvtor by Genre](Images\director_vs_genre_norm_genre.png)
-![direvtor by Genre](Images\director_vs_genre_norm_director.png)
+![direvtor by Genre](Images/director_vs_genre_norm_genre.png)
+![direvtor by Genre](Images/director_vs_genre_norm_director.png)
 <!-- Image should show a box plot or bar chart comparing average budgets across different genres, possibly with a time dimension to show how budgets have changed over decades -->
 
 ## Genre Prediction Pipeline
@@ -65,9 +65,9 @@ The project incorporates additional data from TMDB API to enrich the analysis:
 A complete pipeline was implemented for predicting movie genres based on plot descriptions:
 
 **Tutorial**:
-- [README_genre_predictor.md](README\README_genre_predictor.md)
-- [README_genre_vector_predictor.md](README\README_genre_vector_predictor.md)
-- [README_genre_hybrid_predictor.md](README\README_genre_hybrid_predictor.md)
+- [README_genre_predictor.md](README/README_genre_predictor.md)
+- [README_genre_vector_predictor.md](README/README_genre_vector_predictor.md)
+- [README_genre_hybrid_predictor.md](README/README_genre_hybrid_predictor.md)
 
 **Main Files**:
 - [genre_predictor.py](genre_predictor.py) - Traditional ML-based prediction
@@ -87,7 +87,7 @@ A complete pipeline was implemented for predicting movie genres based on plot de
 
 The system implements three complementary approaches for genre prediction:
 
-![Genre Prediction Approaches](Images\genre_prediction_V2.svg)
+![Genre Prediction Approaches](Images/genre_prediction_V2.svg)
 
 1. **Traditional ML-Based Prediction**: Uses machine learning models trained on text features
 2. **Vector Similarity-Based Prediction**: Uses vector embeddings to find similar movies and extract genres
@@ -166,14 +166,14 @@ The project implements a comprehensive model evaluation system that compares mul
 | Gradient Boosting     | 0.7733   | 0.4608   | 0.7329      | 0.1465       |
 | Decision Tree         | 0.7095   | 0.4673   | 0.7086      | 0.1973       |
 
-![Model Comparison](Images\genre_prediction_model_comparison.png)
+![Model Comparison](Images/genre_prediction_model_comparison.png)
 <!-- Image should show a bar chart comparing all models including the new vector-based and hybrid models, with different metrics (F1-micro, F1-macro, F1-weighted, Hamming Loss) color-coded -->
 
 ### Feature Importance Analysis
 
 The system includes feature importance analysis to identify the most predictive terms for each genre:
 
-![Feature Importance](Images\feature_importance_heatmap.png)
+![Feature Importance](Images/feature_importance_heatmap.png)
 <!-- Image should show a heatmap or word cloud of the most important features/terms for predicting different genres, possibly with a comparison between traditional ML features and vector embedding features -->
 
 
@@ -182,7 +182,7 @@ The system includes feature importance analysis to identify the most predictive 
 The project implements functionality to save trained models and load them for later use:
 
 **Tutorial**:
-- [README_model_saving.md](README\README_model_saving.md)
+- [README_model_saving.md](README/README_model_saving.md)
 
 **Main Files**:
 - [model_saver.py](model_saver.py)
@@ -214,8 +214,8 @@ predictions = best_model.predict(new_data)
 The project includes a module for generating non-spoiler summaries of movie plots using Large Language Models:
 
 **Tutorial**:
-- [README_llm_summarizer.md](README\README_llm_summarizer.md)
-- [README_seq2seq_summarizer.md](README\README_seq2seq_summarizer.md)
+- [README_llm_summarizer.md](README/README_llm_summarizer.md)
+- [README_seq2seq_summarizer.md](README/README_seq2seq_summarizer.md)
 
 **Main Files**:
 - [llm_summarizer.py](llm_summarizer.py) - API-based LLM summarization
@@ -224,7 +224,7 @@ The project includes a module for generating non-spoiler summaries of movie plot
 - [seq2seq_summarizer_example.py](seq2seq_summarizer_example.py)
 
 
-![LLM Summarization Pipeline](Images\summarization.svg)
+![LLM Summarization Pipeline](Images/summarization.svg)
 
 ### Supported LLM Providers
 
@@ -289,7 +289,7 @@ summary = trainer.generate_summary(plot)
 
 The Seq2Seq summarizer is trained on summaries generated by LLMs to create a deployable model:
 
-![LLM Summarization Pipeline](Images\summarization_V2.svg)
+![LLM Summarization Pipeline](Images/summarization_V2.svg)
 <!-- Image should show the training process flow: LLM generates summaries → Summaries used as training data → Seq2Seq model fine-tuned → Model evaluated and deployed -->
 
 ## Vector Database and Search
@@ -297,14 +297,14 @@ The Seq2Seq summarizer is trained on summaries generated by LLMs to create a dep
 The project implements a vector database for movies with semantic search capabilities:
 
 **Tutorial**:
-- [README_vector_search.md](README\README_vector_search.md)
+- [README_vector_search.md](README/README_vector_search.md)
 
 **Main Files**:
 - [movie_vector_db.py](movie_vector_db.py) - Core vector database implementation
 - [movie_vector_search_example.py](movie_vector_search_example.py) - Example usage
 - [movie_vector_visualize_embeddings.py](movie_vector_visualize_embeddings.py) - Embedding visualization
 
-![Vector Database and Search Pipeline](Images\vectorDatabase_V2.svg)
+![Vector Database and Search Pipeline](Images/vectorDatabase_V2.svg)
 <!-- Image should show the flow: Data loading → Preprocessing → Embedding creation → Index building → Searching -->
 
 ### Features
@@ -349,8 +349,8 @@ results = db.search("space exploration adventure", k=5)
 
 The system includes visualization of movie embeddings to understand genre clustering:
 
-![Vector Embeddings](visualizations\moveiEmbed_ed.png)
-![Vector Embeddings](Images\PCA3D.png)
+![Vector Embeddings](visualizations/moveiEmbed_ed.png)
+![Vector Embeddings](Images/PCA3D.png)
 <!-- Image should show a 2D or 3D visualization of movie embeddings using t-SNE or UMAP, with points colored by genre to show how similar movies cluster together -->
 
 ## Future Enhancements
