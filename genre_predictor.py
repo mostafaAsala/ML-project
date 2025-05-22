@@ -259,6 +259,7 @@ class GenrePredictor:
         # Print summary
         self.summary = self.evaluator.print_summary()
 
+        
         return self
 
     def save_models(self, dataset_name=None, save_all=True, include_data=False):
