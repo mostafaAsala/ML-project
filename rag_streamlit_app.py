@@ -71,14 +71,12 @@ def initialize_rag_system():
         # Get configuration from session state or use defaults
         llm_provider = st.session_state.get('llm_provider', 'mistral')
         llm_model = st.session_state.get('llm_model', 'mistral-small')
-        top_k = st.session_state.get('top_k_retrieval', 5)
-        
+
         rag_system = MovieRAGSystem(
             llm_provider=llm_provider,
-            llm_model=llm_model,
-            top_k_retrieval=top_k
+            llm_model=llm_model
         )
-        
+
         # Try to load existing vector database
         vector_db_path = "saved_models/vector_db"
         if os.path.exists(os.path.join(vector_db_path, "faiss_index.bin")):
@@ -89,7 +87,7 @@ def initialize_rag_system():
                 return None, "Failed to load vector database"
         else:
             return None, "Vector database not found. Please set it up first."
-            
+
     except Exception as e:
         return None, f"Error initializing RAG system: {str(e)}"
 
@@ -97,117 +95,120 @@ def setup_sidebar():
     """Setup the sidebar with configuration options."""
     st.sidebar.title("🎬 Movie RAG System")
     st.sidebar.markdown("---")
-    
+
     # System Configuration
     st.sidebar.subheader("⚙️ Configuration")
-    
-    # LLM Provider selection
+
+    # LLM Provider selection (Mistral only)
     llm_provider = st.sidebar.selectbox(
         "LLM Provider",
-        ["mistral", "openai", "anthropic", "huggingface"],
+        ["mistral"],
         index=0,
         key="llm_provider"
     )
-    
-    # Model selection based on provider
+
+    # Model selection for Mistral
     model_options = {
-        "mistral": ["mistral-small", "mistral-medium", "mistral-large"],
-        "openai": ["gpt-3.5-turbo", "gpt-4"],
-        "anthropic": ["claude-3-haiku", "claude-3-sonnet", "claude-3-opus"],
-        "huggingface": ["microsoft/DialoGPT-medium", "facebook/blenderbot-400M-distill"]
+        "mistral": ["mistral-small", "mistral-medium", "mistral-large"]
     }
-    
+
     llm_model = st.sidebar.selectbox(
         "Model",
-        model_options.get(llm_provider, ["default"]),
+        model_options.get(llm_provider, ["mistral-small"]),
         key="llm_model"
     )
-    
-    # Retrieval settings
-    top_k_retrieval = st.sidebar.slider(
-        "Number of movies to retrieve",
-        min_value=1,
-        max_value=10,
-        value=5,
-        key="top_k_retrieval"
-    )
-    
+
     st.sidebar.markdown("---")
-    
+
     # API Key management
     st.sidebar.subheader("🔑 API Keys")
-    
-    if llm_provider == "openai":
-        api_key = st.sidebar.text_input("OpenAI API Key", type="password")
-        if api_key:
-            os.environ["OPENAI_API_KEY"] = api_key
-    elif llm_provider == "mistral":
-        api_key = st.sidebar.text_input("Mistral API Key", type="password")
-        if api_key:
-            os.environ["MISTRAL_API_KEY"] = api_key
-    elif llm_provider == "anthropic":
-        api_key = st.sidebar.text_input("Anthropic API Key", type="password")
-        if api_key:
-            os.environ["ANTHROPIC_API_KEY"] = api_key
-    
+
+    api_key = st.sidebar.text_input("Mistral API Key", type="password")
+    if api_key:
+        os.environ["MISTRAL_API_KEY"] = api_key
+
+    # Show current API key status
+    current_key = os.environ.get("MISTRAL_API_KEY")
+    if current_key:
+        st.sidebar.success("✅ API Key Set")
+    else:
+        st.sidebar.warning("⚠️ API Key Required")
+
     st.sidebar.markdown("---")
-    
+
     # Database setup
     st.sidebar.subheader("🗄️ Database Setup")
-    
+
     if st.sidebar.button("Setup Vector Database"):
         setup_database()
-    
+
+    st.sidebar.markdown("---")
+
     # Conversation management
     st.sidebar.subheader("💬 Conversation")
-    
+
+    # New conversation button (prominent)
+    if st.sidebar.button("🆕 New Conversation", type="primary"):
+        if 'rag_system' in st.session_state:
+            new_conv_id = st.session_state.rag_system.start_new_conversation()
+            st.sidebar.success(f"Started new conversation: {new_conv_id[:8]}...")
+        st.session_state.conversation_history = []
+        st.rerun()
+
+    # Show current conversation stats
+    if 'rag_system' in st.session_state:
+        stats = st.session_state.rag_system.get_conversation_stats()
+        st.sidebar.metric("Conversation Turns", stats['total_turns'])
+        st.sidebar.metric("DB Accesses", stats['database_accesses'])
+        if stats['total_turns'] > 0:
+            st.sidebar.metric("Efficiency", f"{stats['efficiency']}%")
+
     col1, col2 = st.sidebar.columns(2)
     with col1:
-        if st.button("Clear History"):
-            if 'rag_system' in st.session_state:
-                st.session_state.rag_system.clear_conversation_history()
-            st.session_state.conversation_history = []
-            st.rerun()
-    
-    with col2:
         if st.button("Save Chat"):
             save_conversation()
+
+    with col2:
+        if st.button("Show Stats"):
+            if 'rag_system' in st.session_state:
+                stats = st.session_state.rag_system.get_conversation_stats()
+                st.sidebar.json(stats)
 
 def setup_database():
     """Setup the vector database."""
     st.sidebar.info("Setting up vector database...")
-    
+
     # File uploader for movie data
     uploaded_file = st.sidebar.file_uploader(
         "Upload movie data CSV",
         type=['csv'],
         help="Upload your movie dataset (CSV format)"
     )
-    
+
     if uploaded_file is not None:
         try:
             # Save uploaded file temporarily
             temp_path = f"temp_{uploaded_file.name}"
             with open(temp_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
-            
+
             # Initialize RAG system for setup
             rag_system = MovieRAGSystem()
-            
+
             # Setup vector database
             with st.spinner("Setting up vector database... This may take a few minutes."):
                 success = rag_system.setup_vector_db(temp_path, data_source="wiki")
-            
+
             if success:
                 st.sidebar.success("Vector database setup completed!")
                 # Clear cache to reload with new database
                 st.cache_resource.clear()
             else:
                 st.sidebar.error("Failed to setup vector database")
-            
+
             # Clean up temporary file
             os.remove(temp_path)
-            
+
         except Exception as e:
             st.sidebar.error(f"Error setting up database: {str(e)}")
 
@@ -228,7 +229,7 @@ def display_movie_card(movie_data):
     plot = movie_data.get('plot', 'No plot available')
     cast = movie_data.get('cast', 'Unknown Cast')
     similarity_score = movie_data.get('similarity_score', 0)
-    
+
     with st.container():
         st.markdown(f"""
         <div class="movie-card">
@@ -246,10 +247,10 @@ def main():
     # Header
     st.markdown('<h1 class="main-header">🎬 Movie RAG System</h1>', unsafe_allow_html=True)
     st.markdown("Ask questions about movies, get recommendations, and explore our movie database!")
-    
+
     # Setup sidebar
     setup_sidebar()
-    
+
     # Initialize RAG system
     if 'rag_system' not in st.session_state:
         rag_system, message = initialize_rag_system()
@@ -259,41 +260,43 @@ def main():
         else:
             st.error(message)
             st.stop()
-    
+
     # Initialize conversation history
     if 'conversation_history' not in st.session_state:
         st.session_state.conversation_history = []
-    
+
     # Main interface
     col1, col2 = st.columns([2, 1])
-    
+
     with col1:
         st.subheader("💬 Chat with the Movie Expert")
-        
+
         # Chat input
         user_question = st.text_input(
             "Ask me anything about movies:",
             placeholder="e.g., What are some good sci-fi movies? or Tell me about Christopher Nolan films",
             key="user_input"
         )
-        
+
         # Process question
         if user_question and st.button("Ask", type="primary"):
             with st.spinner("Thinking..."):
                 result = st.session_state.rag_system.ask(user_question)
-                
+                print("result: ", result)
                 # Add to conversation history
                 st.session_state.conversation_history.append({
                     'question': user_question,
                     'answer': result['response'],
-                    'retrieved_docs': result['retrieved_docs'],
+                    'database_accessed': result['database_accessed'],
+                    'function_calls': result['function_calls'],
+                    'num_retrieved': result['num_retrieved'],
                     'timestamp': result['timestamp'],
                     'processing_time': result['processing_time']
                 })
-        
+
         # Display conversation history
         st.subheader("📝 Conversation History")
-        
+
         if st.session_state.conversation_history:
             for i, turn in enumerate(reversed(st.session_state.conversation_history)):
                 with st.expander(f"Q: {turn['question'][:50]}...", expanded=(i == 0)):
@@ -302,60 +305,71 @@ def main():
                         <strong>You:</strong> {turn['question']}
                     </div>
                     """, unsafe_allow_html=True)
-                    
+
                     st.markdown(f"""
                     <div class="chat-message assistant-message">
                         <strong>Assistant:</strong> {turn['answer']}
                     </div>
                     """, unsafe_allow_html=True)
-                    
-                    st.caption(f"⏱️ {turn['processing_time']:.2f}s | 📚 {len(turn['retrieved_docs'])} sources")
+
+                    # Show function calling information
+                    db_icon = "🔍" if turn.get('database_accessed', False) else "💭"
+                    func_calls = len(turn.get('function_calls', []))
+                    num_retrieved = turn.get('num_retrieved', 0)
+
+                    st.caption(f"⏱️ {turn['processing_time']:.2f}s | {db_icon} DB: {turn.get('database_accessed', False)} | 🔧 Functions: {func_calls} | 📚 Retrieved: {num_retrieved}")
         else:
             st.info("Start a conversation by asking a question about movies!")
-    
+
     with col2:
         st.subheader("📊 System Status")
-        
+
         # System metrics
         if 'rag_system' in st.session_state:
             rag_system = st.session_state.rag_system
-            
+
             # Database info
             if rag_system.vector_db.movies_df is not None:
                 num_movies = len(rag_system.vector_db.movies_df)
                 st.metric("Movies in Database", num_movies)
-            
+
             # Conversation stats
-            num_conversations = len(st.session_state.conversation_history)
-            st.metric("Questions Asked", num_conversations)
-            
-            # Current settings
-            st.metric("Retrieval Count", rag_system.top_k_retrieval)
-        
+            stats = rag_system.get_conversation_stats()
+            st.metric("Conversation Turns", stats['total_turns'])
+            st.metric("Database Accesses", stats['database_accesses'])
+
+            if stats['total_turns'] > 0:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Efficiency", f"{stats['efficiency']}%")
+                with col2:
+                    st.metric("LLM Provider", rag_system.llm_provider.upper())
+
+            # Current conversation ID
+            st.text(f"Conversation: {stats['conversation_id'][:12]}...")
+
         # Recent sources
-        st.subheader("📚 Recent Sources")
-        
-        if (st.session_state.conversation_history and 
-            st.session_state.conversation_history[-1]['retrieved_docs']):
-            
-            recent_docs = st.session_state.conversation_history[-1]['retrieved_docs'][:3]
-            
-            for doc in recent_docs:
-                with st.container():
-                    title = doc.get('title', 'Unknown')
-                    year = doc.get('year', 'Unknown')
-                    score = doc.get('similarity_score', 0)
-                    
-                    st.markdown(f"""
-                    <div style="border: 1px solid #ddd; padding: 0.5rem; margin: 0.25rem 0; border-radius: 4px;">
-                        <strong>{title}</strong> ({year})<br>
-                        <small>Relevance: {score:.3f}</small>
-                    </div>
-                    """, unsafe_allow_html=True)
-        
+        st.subheader("📚 Recent Function Calls")
+
+        if (st.session_state.conversation_history and
+            st.session_state.conversation_history[-1].get('database_accessed', False)):
+
+            last_turn = st.session_state.conversation_history[-1]
+            num_retrieved = last_turn.get('num_retrieved', 0)
+            func_calls = last_turn.get('function_calls', [])
+
+            if func_calls:
+                st.success(f"🔍 Database searched: {num_retrieved} movies retrieved")
+                for func_call in func_calls:
+                    st.code(f"Function: {func_call['name']}\nQuery: {func_call['arguments'].get('query', 'N/A')}")
+            else:
+                st.info("💭 No database search needed")
+        else:
+            st.info("💭 Recent responses used conversation context")
+
         # Quick actions
         st.subheader("🚀 Quick Actions")
-        
+
         quick_questions = [
             "What are some popular movies?",
             "Recommend a comedy movie",
@@ -363,7 +377,7 @@ def main():
             "What are classic films?",
             "Suggest a horror movie"
         ]
-        
+
         for question in quick_questions:
             if st.button(question, key=f"quick_{question}"):
                 st.session_state.user_input = question

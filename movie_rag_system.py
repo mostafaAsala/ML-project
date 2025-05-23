@@ -1,86 +1,141 @@
 """
-Movie Retrieval-Augmented Generation (RAG) System
+Movie Retrieval-Augmented Generation (RAG) System with Function Calling
 
-This module implements a RAG system for movie-related question answering that combines:
-1. Vector-based retrieval using the MovieVectorDB
-2. LLM-based generation using the LLMSummarizer
-3. Context processing and prompt engineering for accurate responses
+This module implements an advanced RAG system that uses LLM function calling
+to intelligently decide when to access the movie database. The system:
 
-The system can answer questions about movies, provide recommendations,
-and generate detailed responses based on the movie database.
+1. Uses LLM reasoning to determine when database access is needed
+2. Maintains full conversation context for better responses
+3. Provides conversation management with new conversation capabilities
+4. Supports multiple LLM providers with function calling
 """
 
 import os
 import json
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 from datetime import datetime
-import pandas as pd
-
+import Utils
 from movie_vector_db import MovieVectorDB
-from llm_summarizer import LLMSummarizer
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Function definition for LLM function calling
+MOVIE_SEARCH_FUNCTION = {
+    "name": "search_movie_database",
+    "description": "Search the movie database for relevant movies based on user queries. Use this when the user asks about specific movies, genres, directors, actors, or wants movie recommendations.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "The search query to find relevant movies"
+            },
+            "num_results": {
+                "type": "integer",
+                "description": "Number of movies to retrieve (default: 5)",
+                "default": 5
+            }
+        },
+        "required": ["query"]
+    }
+}
+
+
 class MovieRAGSystem:
     """
-    A Retrieval-Augmented Generation system for movie-related question answering.
-    
-    This class combines vector-based retrieval with LLM generation to provide
-    accurate and contextual answers about movies.
+    Advanced RAG system using LLM function calling for intelligent database access.
+
+    This system uses the LLM's reasoning capabilities to decide when to access
+    the movie database, providing more intelligent and context-aware responses.
     """
-    
+
     def __init__(
         self,
         vector_db_path: Optional[str] = None,
-        llm_provider: str = "openai",
-        llm_model: str = "gpt-3.5-turbo",
+        llm_provider: str = "mistral",
+        llm_model: str = "mistral-small",
         embedding_model: str = "all-MiniLM-L6-v2",
-        max_context_length: int = 4000,
-        top_k_retrieval: int = 5
+        api_key: Optional[str] = None
     ):
         """
-        Initialize the RAG system.
-        
+        Initialize the RAG system with function calling capabilities.
+
         Args:
             vector_db_path: Path to the vector database
-            llm_provider: LLM provider ('openai', 'mistral', 'anthropic', etc.)
-            llm_model: Specific model name
+            llm_provider: LLM provider (only 'mistral' supported)
+            llm_model: Specific Mistral model name
             embedding_model: Sentence transformer model for embeddings
-            max_context_length: Maximum context length for LLM
-            top_k_retrieval: Number of documents to retrieve
+            api_key: Mistral API key
         """
         self.vector_db_path = vector_db_path
         self.llm_provider = llm_provider
         self.llm_model = llm_model
-        self.max_context_length = max_context_length
-        self.top_k_retrieval = top_k_retrieval
-        
-        # Initialize components
+        self.api_key = api_key or self._get_api_key()
+
+        # Initialize vector database
         self.vector_db = MovieVectorDB(model_name=embedding_model)
-        self.llm_summarizer = LLMSummarizer(
-            model_name=llm_model,
-            provider=llm_provider,
-            max_tokens=1000,
-            temperature=0.7
-        )
-        
-        # Load vector database if path provided
         if vector_db_path:
             self.load_vector_db(vector_db_path)
-        
-        # Conversation history
+
+        # Conversation management
         self.conversation_history = []
-        
+        self.conversation_id = self._generate_conversation_id()
+
+        # Function calling setup
+        self.available_functions = {
+            "search_movie_database": self._search_movie_database
+        }
+
+    def _get_api_key(self) -> str:
+        """Get Mistral API key from environment variables."""
+        print("00000000000000000000000000000000000000000000000000000000000000000000")
+        if self.llm_provider != "mistral":
+            raise ValueError("Only Mistral provider is supported")
+        api_key = Utils.mistral_api_key #os.environ.get("MISTRAL_API_KEY")
+        print('api_key: ',api_key )
+        if not api_key:
+            logger.error("MISTRAL_API_KEY environment variable not set")
+            raise ValueError("MISTRAL_API_KEY environment variable is required")
+
+        return api_key
+
+    def _generate_conversation_id(self) -> str:
+        """Generate a unique conversation ID."""
+        return f"conv_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    def _search_movie_database(self, query: str, num_results: int = 5) -> List[Dict[str, Any]]:
+        """
+        Function called by LLM to search the movie database.
+
+        Args:
+            query: Search query for movies
+            num_results: Number of results to return
+
+        Returns:
+            List of movie information dictionaries
+        """
+        if self.vector_db.index is None:
+            logger.error("Vector database not loaded")
+            return []
+
+        try:
+            results = self.vector_db.search(query, k=num_results)
+            logger.info(f"Database search: '{query}' returned {len(results)} results")
+            return results
+        except Exception as e:
+            logger.error(f"Error searching database: {e}")
+            return []
+
     def load_vector_db(self, path: str) -> bool:
         """
         Load the vector database from the specified path.
-        
+
         Args:
             path: Path to the vector database
-            
+
         Returns:
             True if loaded successfully
         """
@@ -95,15 +150,15 @@ class MovieRAGSystem:
         except Exception as e:
             logger.error(f"Error loading vector database: {e}")
             return False
-    
+
     def setup_vector_db(self, data_path: str, data_source: str = "wiki") -> bool:
         """
         Set up the vector database from movie data.
-        
+
         Args:
             data_path: Path to the movie data CSV file
             data_source: Source of the data ('wiki' or 'tmdb')
-            
+
         Returns:
             True if setup successfully
         """
@@ -113,265 +168,322 @@ class MovieRAGSystem:
             self.vector_db.preprocess_data()
             self.vector_db.create_embeddings()
             self.vector_db.build_index()
-            
+
             # Save the vector database
             save_path = self.vector_db.save()
             self.vector_db_path = save_path
-            
+
             logger.info("Vector database setup completed successfully")
             return True
-            
+
         except Exception as e:
             logger.error(f"Error setting up vector database: {e}")
             return False
-    
-    def retrieve_context(self, query: str, k: Optional[int] = None) -> List[Dict[str, Any]]:
-        """
-        Retrieve relevant movie information based on the query.
-        
-        Args:
-            query: User query
-            k: Number of results to retrieve (defaults to top_k_retrieval)
-            
-        Returns:
-            List of relevant movie documents
-        """
-        if self.vector_db.index is None:
-            raise ValueError("Vector database not loaded. Call load_vector_db() or setup_vector_db() first.")
-        
-        k = k or self.top_k_retrieval
-        
-        try:
-            results = self.vector_db.search(query, k=k)
-            logger.info(f"Retrieved {len(results)} relevant documents for query: '{query[:50]}...'")
-            return results
-        except Exception as e:
-            logger.error(f"Error retrieving context: {e}")
-            return []
-    
-    def format_context(self, retrieved_docs: List[Dict[str, Any]]) -> str:
-        """
-        Format retrieved documents into a context string for the LLM.
-        
-        Args:
-            retrieved_docs: List of retrieved movie documents
-            
-        Returns:
-            Formatted context string
-        """
-        if not retrieved_docs:
-            return "No relevant movie information found."
-        
-        context_parts = []
-        for i, doc in enumerate(retrieved_docs, 1):
-            # Extract key information
-            title = doc.get('title', 'Unknown Title')
-            year = doc.get('year', 'Unknown Year')
-            director = doc.get('director', 'Unknown Director')
-            genre = doc.get('genre', 'Unknown Genre')
-            plot = doc.get('plot', 'No plot available')
-            cast = doc.get('cast', 'Unknown Cast')
-            similarity_score = doc.get('similarity_score', 0)
-            
-            # Format the document
-            doc_text = f"""
-Movie {i}: {title} ({year})
-Director: {director}
-Genre: {genre}
-Cast: {cast}
-Plot: {plot[:500]}{'...' if len(str(plot)) > 500 else ''}
-Relevance Score: {similarity_score:.3f}
-"""
-            context_parts.append(doc_text.strip())
-        
-        return "\n\n".join(context_parts)
-    
-    def create_prompt(self, query: str, context: str, conversation_history: List[Dict] = None) -> str:
-        """
-        Create a prompt for the LLM that includes the query, context, and conversation history.
-        
-        Args:
-            query: User query
-            context: Retrieved context
-            conversation_history: Previous conversation turns
-            
-        Returns:
-            Formatted prompt string
-        """
-        # Base system prompt
-        system_prompt = """You are a knowledgeable movie expert assistant. You help users find information about movies, provide recommendations, and answer questions based on the movie database.
 
-Instructions:
-1. Use the provided movie context to answer questions accurately
-2. If the context doesn't contain enough information, say so clearly
-3. Provide specific details when available (titles, years, directors, cast, etc.)
-4. For recommendations, explain why you're suggesting specific movies
-5. Be conversational and helpful
-6. If asked about movies not in the context, acknowledge the limitation
-
-Movie Database Context:
-{context}
-
-"""
-        
-        # Add conversation history if available
-        history_text = ""
-        if conversation_history:
-            history_text = "\nPrevious Conversation:\n"
-            for turn in conversation_history[-3:]:  # Last 3 turns
-                history_text += f"User: {turn['query']}\n"
-                history_text += f"Assistant: {turn['response'][:200]}...\n\n"
-        
-        # Combine everything
-        full_prompt = system_prompt.format(context=context) + history_text + f"\nUser Question: {query}\n\nAssistant:"
-        
-        # Truncate if too long
-        if len(full_prompt) > self.max_context_length:
-            # Truncate context while keeping system prompt and query
-            available_length = self.max_context_length - len(system_prompt) - len(f"\nUser Question: {query}\n\nAssistant:") - 200
-            truncated_context = context[:available_length] + "...[truncated]"
-            full_prompt = system_prompt.format(context=truncated_context) + f"\nUser Question: {query}\n\nAssistant:"
-        
-        return full_prompt
-    
-    def generate_response(self, prompt: str) -> str:
+    def _call_llm_with_functions(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
         """
-        Generate a response using the LLM.
-        
+        Call Mistral LLM with function calling capabilities.
+
         Args:
-            prompt: The formatted prompt
-            
+            messages: List of conversation messages
+
         Returns:
-            Generated response
+            LLM response with potential function calls
         """
         try:
-            response = self.llm_summarizer._call_llm_api(prompt)
-            return response.strip()
+            if self.llm_provider != "mistral":
+                raise ValueError("Only Mistral provider is supported")
+
+            return self._call_mistral_with_functions(messages)
         except Exception as e:
-            logger.error(f"Error generating response: {e}")
-            return f"I apologize, but I encountered an error while generating a response: {str(e)}"
-    
-    def ask(self, query: str, include_context: bool = True, k: Optional[int] = None) -> Dict[str, Any]:
+            logger.error(f"Error calling Mistral LLM: {e}")
+            return {
+                "content": f"I apologize, but I encountered an error: {str(e)}",
+                "function_calls": []
+            }
+
+    def _call_mistral_with_functions(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Call Mistral API with function calling."""
+        try:
+            from mistralai import Mistral
+
+            # Validate API key
+            if not self.api_key or self.api_key.strip() == "":
+                raise ValueError("Mistral API key is empty or not set")
+
+            client = Mistral(api_key=self.api_key)
+
+            # Convert function definition to Mistral format
+            tools = [{
+                "type": "function",
+                "function": MOVIE_SEARCH_FUNCTION
+            }]
+
+            response = client.chat.complete(
+                model=self.llm_model,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                temperature=0.7
+            )
+
+            message = response.choices[0].message
+
+            result = {
+                "content": message.content or "",
+                "function_calls": []
+            }
+
+            if message.tool_calls:
+                for tool_call in message.tool_calls:
+                    if tool_call.function:
+                        result["function_calls"].append({
+                            "name": tool_call.function.name,
+                            "arguments": json.loads(tool_call.function.arguments)
+                        })
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Mistral API error: {e}")
+            raise
+
+    def _execute_function_calls(self, function_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Ask a question and get a response from the RAG system.
-        
+        Execute function calls and return results.
+
         Args:
-            query: User question
-            include_context: Whether to include retrieved context in response
-            k: Number of documents to retrieve
-            
+            function_calls: List of function calls to execute
+
         Returns:
-            Dictionary containing the response and metadata
+            List of function call results
+        """
+        results = []
+
+        for func_call in function_calls:
+            func_name = func_call["name"]
+            func_args = func_call["arguments"]
+
+            if func_name in self.available_functions:
+                try:
+                    result = self.available_functions[func_name](**func_args)
+                    results.append({
+                        "function_name": func_name,
+                        "arguments": func_args,
+                        "result": result
+                    })
+                    logger.info(f"Executed function {func_name} with {len(result)} results")
+                except Exception as e:
+                    logger.error(f"Error executing function {func_name}: {e}")
+                    results.append({
+                        "function_name": func_name,
+                        "arguments": func_args,
+                        "result": [],
+                        "error": str(e)
+                    })
+            else:
+                logger.warning(f"Unknown function: {func_name}")
+
+        return results
+
+    def _format_conversation_messages(self, user_query: str) -> List[Dict[str, str]]:
+        """
+        Format the full conversation history for the LLM.
+
+        Args:
+            user_query: Current user query
+
+        Returns:
+            List of formatted messages
+        """
+        messages = [{
+            "role": "system",
+            "content": """You are a knowledgeable movie expert assistant. You help users find information about movies, provide recommendations, and answer questions.
+
+When users ask about specific movies, genres, directors, actors, or want recommendations, use the search_movie_database function to find relevant information from the movie database.
+
+For general conversation, greetings, or questions that don't require movie data, respond directly without using the function.
+
+Be conversational, helpful, and provide detailed responses based on the information you find."""
+        }]
+
+        # Add conversation history
+        for turn in self.conversation_history:
+            messages.append({"role": "user", "content": turn["user_message"]})
+            messages.append({"role": "assistant", "content": turn["assistant_message"]})
+
+        # Add current user query
+        messages.append({"role": "user", "content": user_query})
+
+        return messages
+
+    def ask(self, user_query: str) -> Dict[str, Any]:
+        """
+        Process user query using function calling to intelligently access the database.
+
+        Args:
+            user_query: User's question or request
+
+        Returns:
+            Dictionary containing response and metadata
         """
         start_time = datetime.now()
-        
+
         try:
-            # Step 1: Retrieve relevant context
-            retrieved_docs = self.retrieve_context(query, k=k)
-            
-            # Step 2: Format context
-            context = self.format_context(retrieved_docs)
-            
-            # Step 3: Create prompt
-            prompt = self.create_prompt(query, context, self.conversation_history)
-            
-            # Step 4: Generate response
-            response = self.generate_response(prompt)
-            
-            # Step 5: Prepare result
+            # Format conversation messages
+            messages = self._format_conversation_messages(user_query)
+
+            # Call LLM with function calling
+            llm_response = self._call_llm_with_functions(messages)
+
+            # Execute any function calls
+            function_results = []
+            if llm_response["function_calls"]:
+                function_results = self._execute_function_calls(llm_response["function_calls"])
+
+                # If functions were called, make a second LLM call with results
+                if function_results:
+                    # Add function results to messages
+                    for func_result in function_results:
+                        function_message = {
+                            "role": "function",
+                            "name": func_result["function_name"],
+                            "content": json.dumps(func_result["result"][:3])  # Limit to top 3 results
+                        }
+                        messages.append(function_message)
+
+                    # Get final response with function results
+                    final_response = self._call_llm_with_functions(messages)
+                    response_text = final_response["content"]
+                else:
+                    response_text = llm_response["content"]
+            else:
+                response_text = llm_response["content"]
+
+            # Prepare result
             result = {
-                'query': query,
-                'response': response,
-                'retrieved_docs': retrieved_docs if include_context else [],
-                'num_retrieved': len(retrieved_docs),
-                'timestamp': start_time.isoformat(),
-                'processing_time': (datetime.now() - start_time).total_seconds()
+                "query": user_query,
+                "response": response_text,
+                "function_calls": llm_response["function_calls"],
+                "function_results": function_results,
+                "database_accessed": len(function_results) > 0,
+                "num_retrieved": sum(len(fr.get("result", [])) for fr in function_results),
+                "conversation_id": self.conversation_id,
+                "timestamp": start_time.isoformat(),
+                "processing_time": (datetime.now() - start_time).total_seconds()
             }
-            
-            # Step 6: Update conversation history
+
+            # Update conversation history
             self.conversation_history.append({
-                'query': query,
-                'response': response,
-                'timestamp': start_time.isoformat()
+                "user_message": user_query,
+                "assistant_message": response_text,
+                "function_calls": llm_response["function_calls"],
+                "timestamp": start_time.isoformat()
             })
-            
-            # Keep only last 10 conversations
-            if len(self.conversation_history) > 10:
-                self.conversation_history = self.conversation_history[-10:]
-            
-            logger.info(f"Successfully processed query in {result['processing_time']:.2f} seconds")
+
+            # Keep conversation history manageable (last 20 turns)
+            if len(self.conversation_history) > 20:
+                self.conversation_history = self.conversation_history[-20:]
+
+            logger.info(f"Query processed in {result['processing_time']:.2f}s, DB accessed: {result['database_accessed']}")
             return result
-            
+
         except Exception as e:
-            logger.error(f"Error processing query '{query}': {e}")
+            logger.error(f"Error processing query '{user_query}': {e}")
             return {
-                'query': query,
-                'response': f"I apologize, but I encountered an error while processing your question: {str(e)}",
-                'retrieved_docs': [],
-                'num_retrieved': 0,
-                'timestamp': start_time.isoformat(),
-                'processing_time': (datetime.now() - start_time).total_seconds(),
-                'error': str(e)
+                "query": user_query,
+                "response": f"I apologize, but I encountered an error while processing your question: {str(e)}",
+                "function_calls": [],
+                "function_results": [],
+                "database_accessed": False,
+                "num_retrieved": 0,
+                "conversation_id": self.conversation_id,
+                "timestamp": start_time.isoformat(),
+                "processing_time": (datetime.now() - start_time).total_seconds(),
+                "error": str(e)
             }
-    
-    def get_conversation_history(self) -> List[Dict]:
-        """Get the conversation history."""
-        return self.conversation_history.copy()
-    
-    def clear_conversation_history(self):
-        """Clear the conversation history."""
+
+    def start_new_conversation(self) -> str:
+        """
+        Start a new conversation by clearing history and generating new ID.
+
+        Returns:
+            New conversation ID
+        """
         self.conversation_history = []
-        logger.info("Conversation history cleared")
-    
-    def save_conversation(self, file_path: str):
+        self.conversation_id = self._generate_conversation_id()
+        logger.info(f"Started new conversation: {self.conversation_id}")
+        return self.conversation_id
+
+    def get_conversation_history(self) -> List[Dict[str, Any]]:
+        """Get the current conversation history."""
+        return self.conversation_history.copy()
+
+    def get_conversation_stats(self) -> Dict[str, Any]:
         """
-        Save conversation history to a JSON file.
-        
-        Args:
-            file_path: Path to save the conversation
+        Get statistics about the current conversation.
+
+        Returns:
+            Dictionary with conversation statistics
         """
-        try:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(self.conversation_history, f, indent=2, ensure_ascii=False)
-            logger.info(f"Conversation saved to {file_path}")
-        except Exception as e:
-            logger.error(f"Error saving conversation: {e}")
-    
-    def load_conversation(self, file_path: str):
-        """
-        Load conversation history from a JSON file.
-        
-        Args:
-            file_path: Path to load the conversation from
-        """
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                self.conversation_history = json.load(f)
-            logger.info(f"Conversation loaded from {file_path}")
-        except Exception as e:
-            logger.error(f"Error loading conversation: {e}")
+        total_turns = len(self.conversation_history)
+        db_accesses = sum(1 for turn in self.conversation_history if turn.get("function_calls"))
+
+        return {
+            "conversation_id": self.conversation_id,
+            "total_turns": total_turns,
+            "database_accesses": db_accesses,
+            "efficiency": round((total_turns - db_accesses) / max(total_turns, 1) * 100, 1),
+            "started_at": self.conversation_history[0]["timestamp"] if self.conversation_history else None
+        }
 
 
-# Example usage and testing functions
+# Example usage
 if __name__ == "__main__":
-    # Example usage
-    print("Initializing Movie RAG System...")
-    
+    print("Initializing Movie RAG System with Function Calling...")
+
     # Initialize the RAG system
     rag_system = MovieRAGSystem(
-        llm_provider="mistral",  # Change to your preferred provider
-        llm_model="mistral-small",
-        top_k_retrieval=3
+        llm_provider="mistral",
+        llm_model="mistral-small"
     )
-    
+
+    # Load vector database (if available)
+    vector_db_path = "saved_models/vector_db"
+    if os.path.exists(os.path.join(vector_db_path, "faiss_index.bin")):
+        rag_system.load_vector_db(vector_db_path)
+        print("✅ Vector database loaded")
+    else:
+        print("❌ Vector database not found. Please set it up first.")
+        exit(1)
+
     # Example questions
     example_questions = [
-        "What are some good sci-fi movies?",
-        "Tell me about movies directed by Christopher Nolan",
-        "What movies are similar to The Matrix?",
-        "Can you recommend some romantic comedies?",
-        "What are the best movies from the 1990s?"
+        "Hello! How are you?",  # Should not access database
+        "What are some good sci-fi movies?",  # Should access database
+        "Tell me more about the first one",  # Should use conversation context
+        "Who directed it?",  # Should use conversation context
+        "What are some comedy movies?",  # Should access database again
     ]
-    
-    print("RAG System initialized. Ready for questions!")
-    print("Note: Make sure to set up the vector database first using setup_vector_db() method.")
+
+    print("\n🎬 Testing Function Calling RAG System:")
+    print("=" * 50)
+
+    for i, question in enumerate(example_questions, 1):
+        print(f"\n{i}. Question: {question}")
+        result = rag_system.ask(question)
+
+        print(f"   Response: {result['response'][:100]}...")
+        print(f"   Database accessed: {result['database_accessed']}")
+        print(f"   Function calls: {len(result['function_calls'])}")
+        print(f"   Processing time: {result['processing_time']:.2f}s")
+
+    # Show conversation stats
+    print(f"\n📊 Conversation Statistics:")
+    stats = rag_system.get_conversation_stats()
+    for key, value in stats.items():
+        print(f"   {key}: {value}")
+
+    print("\n✨ Function calling RAG system ready!")
+    print("The LLM intelligently decides when to access the database.")
+    print("Use start_new_conversation() to begin a fresh conversation.")

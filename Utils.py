@@ -1,6 +1,6 @@
 import re
 
-
+mistral_api_key = 'apyBSpr2TCJj8TwRpVQCaBU4vKtyTUTB'
 known_genres = {
     'action': ['action'],
     'adventure': ['adventure'],
