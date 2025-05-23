@@ -9,3 +9,5 @@ logs/
 *.csv
 generated_summaries/
 visualizations/
+setup_rag_system.py
+test_rag_system.py
