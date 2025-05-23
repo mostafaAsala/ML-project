@@ -21,6 +21,8 @@ from tqdm import tqdm
 import faiss
 from sentence_transformers import SentenceTransformer
 
+from Utils import extract_genres_from_string
+
 class MovieVectorDB:
     """
     A vector database for movies that enables semantic search based on movie descriptions,
@@ -77,54 +79,7 @@ class MovieVectorDB:
             # Convert genre to list
 
                         # Define all known genres and their aliases
-            known_genres = {
-                'action': ['action'],
-                'adventure': ['adventure'],
-                'animation': ['animation', 'animated'],
-                'biography': ['biography', 'bio'],
-                'comedy': ['comedy', 'comedies'],
-                'crime': ['crime'],
-                'documentary': ['documentary', 'doc'],
-                'drama': ['drama'],
-                'family': ['family'],
-                'fantasy': ['fantasy'],
-                'history': ['history', 'historical'],
-                'horror': ['horror'],
-                'music': ['music', 'musical', 'musicals'],
-                'mystery': ['mystery'],
-                'romance': ['romance', 'romantic'],
-                'sci-fi': ['sci-fi', 'science fiction', 'scifi', 'science-fiction'],
-                'sport': ['sport', 'sports'],
-                'thriller': ['thriller'],
-                'war': ['war'],
-                'western': ['western'],
-                'unknown': ['unknown']
-            }
-
-            # Create a mapping from alias to canonical genre
-            alias_to_genre = {}
-            for genre, aliases in known_genres.items():
-                for alias in aliases:
-                    alias_to_genre[alias.lower()] = genre
-
-            def extract_genres_from_string(genre_str):
-                if not isinstance(genre_str, str):
-                    return ['unknown']
-                # Lowercase and split by comma or slash or semicolon
-                tokens = re.split(r'[,/;]', genre_str.lower())
-                genres_found = set()
-                for token in tokens:
-                    token = token.strip()
-                    if token in alias_to_genre:
-                        genres_found.add(alias_to_genre[token])
-                    else:
-                        # Try partial match for multi-word genres
-                        for alias, genre in alias_to_genre.items():
-                            if alias in token:
-                                genres_found.add(genre)
-                if not genres_found:
-                    return ['unknown']
-                return list(genres_found)
+            
 
             # Apply to the 'Genre' column to create a clean genre list
             df['genre'] = df['genre'].apply(extract_genres_from_string)
@@ -177,11 +132,9 @@ class MovieVectorDB:
         # Create text representation for embedding
         if 'plot' in df.columns:
             df['text_for_embedding'] = df.apply(
-                lambda row: f"Title: {row['title']} " +
-                           f"Director: {row['director']} " +
-                           f"Genre: {row['genre']} " +
-                           f"Year: {str(row['year'])} " +
-                           f"Plot: {row['plot'][:1000]}",  # Limit plot length
+                lambda row: f"The movie titled '{row['title']}' was directed by {row['director']}. "
+                f"It falls under the '{row['genre']}' genre and was released in {row['year']}. "
+                f"Plot summary: {row['plot'][:1000]}"   ,  # Limit plot length
                 axis=1
             )
         else:

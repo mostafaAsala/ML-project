@@ -177,7 +177,8 @@ class GenrePredictor:
         # Select top features
         self.X_selected = self.selector.fit_transform(self.X_combined, self.y)
         print(f"Selected features shape: {self.X_selected.shape}")
-
+        
+        
         # Get feature names
         tfidf_feature_names = self.tfidf.get_feature_names_out()
         location_feature_names = self.X_location.columns.tolist()
