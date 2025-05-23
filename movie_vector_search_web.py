@@ -143,22 +143,30 @@ def load_summarizer():
         return None
 
 
-def predict_missing_genres(movie: Dict, genre_predictor: GenrePredictor) -> List[str]:
-    """Predict genres for movies that don't have them."""
+def predict_movie_genres(movie: Dict, genre_predictor: GenrePredictor) -> Dict[str, List[str]]:
+    """Predict genres for any movie and return both original and predicted genres."""
+    result = {
+        'original_genres': [],
+        'predicted_genres': []
+    }
+
     if not genre_predictor:
-        return []
+        return result
 
-    # Check if movie already has genres
+    # Get existing genres
     existing_genres = movie.get('genre', [])
-    if existing_genres and len(existing_genres) > 0:
-        return existing_genres if isinstance(existing_genres, list) else [existing_genres]
+    if existing_genres:
+        if isinstance(existing_genres, list):
+            result['original_genres'] = existing_genres
+        else:
+            result['original_genres'] = [existing_genres]
 
-    # Prepare data for prediction
+    # Always predict genres regardless of whether movie has them
     plot = movie.get('plot', '')
     origin = movie.get('origin', '') or movie.get('Origin/Ethnicity', '') or 'Unknown'
 
     if not plot:
-        return []
+        return result
 
     try:
         # Create data in the format expected by the predictor
@@ -173,15 +181,48 @@ def predict_missing_genres(movie: Dict, genre_predictor: GenrePredictor) -> List
         # Handle different return formats
         if isinstance(predicted_genres, list) and len(predicted_genres) > 0:
             if isinstance(predicted_genres[0], list):
-                return predicted_genres[0]
+                result['predicted_genres'] = predicted_genres[0]
             else:
-                return predicted_genres
+                result['predicted_genres'] = predicted_genres
 
-        return []
+        return result
 
     except Exception as e:
-        st.error(f"Error predicting genres: {e}")
-        return []
+        st.warning(f"Error predicting genres for {movie.get('title', 'unknown movie')}: {e}")
+        return result
+
+
+def enhance_results_with_predictions(results: List[Dict], genre_predictor) -> List[Dict]:
+    """Enhance search results with genre predictions for all movies."""
+    if not genre_predictor or not results:
+        return results
+
+    enhanced_results = []
+
+    # Show progress for genre prediction
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    for i, movie in enumerate(results):
+        # Update progress
+        progress = (i + 1) / len(results)
+        progress_bar.progress(progress)
+        status_text.text(f"🤖 Predicting genres... {i+1}/{len(results)}")
+
+        # Create enhanced movie copy
+        enhanced_movie = movie.copy()
+
+        # Predict genres
+        genre_predictions = predict_movie_genres(movie, genre_predictor)
+        enhanced_movie['genre_predictions'] = genre_predictions
+
+        enhanced_results.append(enhanced_movie)
+
+    # Clear progress indicators
+    progress_bar.empty()
+    status_text.empty()
+
+    return enhanced_results
 
 
 def summarize_plot(plot: str, summarizer: Seq2SeqSummarizerTrainer, title: str = "") -> str:
@@ -310,7 +351,7 @@ def display_entity_info(entities: Dict[str, List[str]]):
 
 
 def display_search_results(results: List[Dict], entities: Dict[str, List[str]] = None,
-                          genre_predictor=None, summarizer=None):
+                          summarizer=None):
     """Display search results with entity highlighting, genre prediction, and plot summarization."""
     if not results:
         st.warning("No results found.")
@@ -333,44 +374,46 @@ def display_search_results(results: List[Dict], entities: Dict[str, List[str]] =
                 if 'year' in movie and movie['year']:
                     st.write(f"**Year:** {movie['year']}")
 
-                # Handle genres with prediction for missing ones
-                movie_genres = movie.get('genre', [])
-                genre_text = ""
-                predicted = False
+                # Handle genres - show both original and predicted
+                original_genres = movie.get('genre', [])
+                genre_predictions = movie.get('genre_predictions', {})
+                predicted_genres = genre_predictions.get('predicted_genres', [])
 
-                if not movie_genres or len(movie_genres) == 0:
-                    # Predict genres if missing
-                    if genre_predictor:
-                        with st.spinner("🤖 Predicting genres..."):
-                            predicted_genres = predict_missing_genres(movie, genre_predictor)
-                            if predicted_genres:
-                                movie_genres = predicted_genres
-                                predicted = True
-
-                if movie_genres:
-                    # Handle different genre formats
-                    if isinstance(movie_genres, list):
-                        genre_text = ', '.join(str(g) for g in movie_genres)
-                    elif isinstance(movie_genres, str):
-                        genre_text = movie_genres
+                # Display original genres
+                if original_genres:
+                    if isinstance(original_genres, list):
+                        original_text = ', '.join(str(g) for g in original_genres)
                     else:
-                        genre_text = str(movie_genres)
+                        original_text = str(original_genres)
 
                     # Highlight matched genres
                     if entities and entities['GENRE']:
                         for genre in entities['GENRE']:
-                            if genre.lower() in genre_text.lower():
-                                # Use case-insensitive replacement
+                            if genre.lower() in original_text.lower():
                                 pattern = re.compile(re.escape(genre), re.IGNORECASE)
-                                genre_text = pattern.sub(f"**{genre}**", genre_text)
+                                original_text = pattern.sub(f"**{genre}**", original_text)
 
-                    # Add prediction indicator
-                    if predicted:
-                        st.write(f"**Genre:** {genre_text} 🤖")
-                        st.caption("🤖 = AI predicted")
+                    st.write(f"**Genre:** {original_text}")
+
+                # Display predicted genres if available
+                if predicted_genres:
+                    predicted_text = ', '.join(str(g) for g in predicted_genres)
+
+                    # Highlight matched predicted genres
+                    if entities and entities['GENRE']:
+                        for genre in entities['GENRE']:
+                            if genre.lower() in predicted_text.lower():
+                                pattern = re.compile(re.escape(genre), re.IGNORECASE)
+                                predicted_text = pattern.sub(f"**{genre}**", predicted_text)
+
+                    if original_genres:
+                        st.write(f"**AI Predicted:** {predicted_text} 🤖")
                     else:
-                        st.write(f"**Genre:** {genre_text}")
-                else:
+                        st.write(f"**Genre:** {predicted_text} 🤖")
+                        st.caption("🤖 = AI predicted (no original genres)")
+
+                # If no genres at all
+                if not original_genres and not predicted_genres:
                     st.write("**Genre:** Not available")
 
                 if 'director' in movie and movie['director']:
@@ -535,6 +578,8 @@ def main():
                 num_results = st.slider("Results", min_value=1, max_value=20, value=10)
                 use_ner_filtering = st.checkbox("🎯 NER Filtering", value=True,
                                               help="Use NER to extract and filter by entities")
+                use_genre_prediction = st.checkbox("🤖 Genre Prediction", value=True,
+                                                 help="Predict genres for all retrieved movies using AI")
 
             if st.button("🔍 Search", type="primary") or query:
                 if query:
@@ -566,12 +611,16 @@ def main():
                             else:
                                 results = results[:num_results]
 
-                            # Step 4: Display results
+                            # Step 4: Enhance results with genre predictions
+                            if results and genre_predictor and use_genre_prediction:
+                                st.info("🤖 Enhancing results with AI genre predictions...")
+                                results = enhance_results_with_predictions(results, genre_predictor)
+
+                            # Step 5: Display results
                             if results:
                                 display_search_results(
                                     results,
                                     entities if use_ner_filtering else None,
-                                    genre_predictor,
                                     summarizer
                                 )
                             else:
@@ -594,7 +643,8 @@ def main():
             # Genre Predictor
             if genre_predictor:
                 st.sidebar.success("✓ Genre predictor loaded")
-                st.sidebar.write("**Predicts:** Missing genres")
+                st.sidebar.write("**Predicts:** Genres for all movies")
+                st.sidebar.write("**Shows:** Original + AI predicted")
             else:
                 st.sidebar.warning("⚠ Genre predictor not available")
 
@@ -654,7 +704,7 @@ def main():
         st.info("Please create a vector database using the sidebar options.")
 
         # Show model demos even without database
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
 
         with col1:
             # Show NER demo
@@ -676,6 +726,42 @@ def main():
                         st.info("No entities detected in this query.")
 
         with col2:
+            # Show genre prediction demo
+            if genre_predictor:
+                st.subheader("🤖 Genre Prediction Demo")
+                st.write("Try genre prediction:")
+
+                demo_plot_genre = st.text_area(
+                    "Test genre prediction:",
+                    placeholder="Enter a movie plot to predict genres...",
+                    help="Enter a movie plot to see what genres the AI predicts",
+                    height=100,
+                    key="genre_demo_plot"
+                )
+
+                if demo_plot_genre and len(demo_plot_genre) > 50:
+                    if st.button("🤖 Predict Genres", key="predict_genres_demo"):
+                        with st.spinner("🤖 Predicting genres..."):
+                            demo_movie = {
+                                'plot': demo_plot_genre,
+                                'title': 'Demo Movie',
+                                'origin': 'Unknown'
+                            }
+                            genre_predictions = predict_movie_genres(demo_movie, genre_predictor)
+                            predicted_genres = genre_predictions.get('predicted_genres', [])
+
+                            if predicted_genres:
+                                st.write("**Predicted Genres:**")
+                                st.write(', '.join(predicted_genres))
+                                st.caption("🤖 Generated by AI genre predictor")
+                            else:
+                                st.info("No genres predicted for this plot.")
+            else:
+                st.subheader("🤖 Genre Predictor")
+                st.write("No genre predictor loaded.")
+                st.info("Train a genre predictor to see AI-powered genre predictions.")
+
+        with col3:
             # Show seq2seq summarizer demo
             if summarizer:
                 st.subheader("📝 Summarizer Demo")
