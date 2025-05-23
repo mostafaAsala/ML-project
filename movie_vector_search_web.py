@@ -14,13 +14,14 @@ Usage:
     streamlit run movie_vector_search_web.py
 """
 
-import traceback
 import streamlit as st
 import os
 import re
 from typing import List, Dict
 from movie_vector_db import MovieVectorDB
 from ner_model import MovieNERModel
+from genre_predictor import GenrePredictor
+from seq2seq_summarizer_trainer import Seq2SeqSummarizerTrainer
 
 # Add streamlit to requirements.txt if not already there
 try:
@@ -78,6 +79,141 @@ def load_ner_model():
     except Exception as e:
         st.error(f"Failed to train NER model: {e}")
         return None
+
+
+@st.cache_resource
+def load_genre_predictor():
+    """Load the genre predictor model with caching."""
+    try:
+        predictor = GenrePredictor.load(models_dir='saved_models')
+        st.success("✓ Loaded genre predictor model")
+        return predictor
+    except Exception as e:
+        st.warning(f"Could not load genre predictor: {e}")
+        return None
+
+
+@st.cache_resource
+def load_summarizer():
+    """Load the seq2seq summarizer with caching."""
+    # Try to find an existing trained seq2seq model
+    seq2seq_model_paths = [
+        "seq2seq_summarizer_model",
+        "saved_models/seq2seq_summarizer_model",
+        "saved_models/seq2seq_model"
+    ]
+
+    # Look for any seq2seq model with timestamp
+    import glob
+    for base_path in seq2seq_model_paths:
+        if os.path.exists(base_path):
+            try:
+                summarizer = Seq2SeqSummarizerTrainer.load_model(base_path)
+                st.success(f"✓ Loaded seq2seq summarizer from: {base_path}")
+                return summarizer
+            except Exception as e:
+                st.warning(f"Failed to load seq2seq model from {base_path}: {e}")
+                continue
+
+        # Also check for timestamped versions
+        pattern = f"{base_path}_*"
+        matches = glob.glob(pattern)
+        if matches:
+            latest_model = max(matches)
+            try:
+                summarizer = Seq2SeqSummarizerTrainer.load_model(latest_model)
+                st.success(f"✓ Loaded seq2seq summarizer from: {latest_model}")
+                return summarizer
+            except Exception as e:
+                st.warning(f"Failed to load seq2seq model from {latest_model}: {e}")
+                continue
+
+    # If no trained model found, try to create a basic one
+    st.warning("No trained seq2seq model found. Using base T5 model (limited performance).")
+    try:
+        summarizer = Seq2SeqSummarizerTrainer(
+            model_name="t5-small",
+            max_input_length=512,
+            max_output_length=128
+        )
+        st.warning("✓ Loaded base T5 model (not fine-tuned for movie summaries)")
+        return summarizer
+    except Exception as e:
+        st.error(f"Could not load any summarizer: {e}")
+        return None
+
+
+def predict_missing_genres(movie: Dict, genre_predictor: GenrePredictor) -> List[str]:
+    """Predict genres for movies that don't have them."""
+    if not genre_predictor:
+        return []
+
+    # Check if movie already has genres
+    existing_genres = movie.get('genre', [])
+    if existing_genres and len(existing_genres) > 0:
+        return existing_genres if isinstance(existing_genres, list) else [existing_genres]
+
+    # Prepare data for prediction
+    plot = movie.get('plot', '')
+    origin = movie.get('origin', '') or movie.get('Origin/Ethnicity', '') or 'Unknown'
+
+    if not plot:
+        return []
+
+    try:
+        # Create data in the format expected by the predictor
+        prediction_data = {
+            'plot_lemmatized': plot,  # Use plot as is, assuming it's already processed
+            'Origin/Ethnicity': origin
+        }
+
+        # Make prediction
+        predicted_genres = genre_predictor.predict(prediction_data)
+
+        # Handle different return formats
+        if isinstance(predicted_genres, list) and len(predicted_genres) > 0:
+            if isinstance(predicted_genres[0], list):
+                return predicted_genres[0]
+            else:
+                return predicted_genres
+
+        return []
+
+    except Exception as e:
+        st.error(f"Error predicting genres: {e}")
+        return []
+
+
+def summarize_plot(plot: str, summarizer: Seq2SeqSummarizerTrainer, title: str = "") -> str:
+    """Summarize a movie plot using the seq2seq summarizer."""
+    if not summarizer or not plot:
+        return plot[:200] + "..." if len(plot) > 200 else plot
+
+    try:
+        # For seq2seq models, we can directly pass the plot text
+        # The model should be trained to generate summaries from plot text
+
+        # Prepare the input text - some models work better with a prefix
+        if title:
+            input_text = f"summarize: {title}: {plot}"
+        else:
+            input_text = f"summarize: {plot}"
+
+        # Generate summary using the seq2seq model
+        summary = summarizer.generate_summary(input_text)
+
+        # Clean up the summary
+        summary = summary.strip()
+
+        # If summary is too short or seems like it failed, fallback to truncation
+        if len(summary) < 10 or summary.lower().startswith("summarize"):
+            return plot[:200] + "..." if len(plot) > 200 else plot
+
+        return summary
+
+    except Exception as e:
+        # Fallback to simple truncation
+        return plot[:200] + "..." if len(plot) > 200 else plot
 
 
 def extract_entities_from_query(query: str, ner_model: MovieNERModel) -> Dict[str, List[str]]:
@@ -173,8 +309,9 @@ def display_entity_info(entities: Dict[str, List[str]]):
         st.write("---")
 
 
-def display_search_results(results: List[Dict], entities: Dict[str, List[str]] = None):
-    """Display search results with entity highlighting."""
+def display_search_results(results: List[Dict], entities: Dict[str, List[str]] = None,
+                          genre_predictor=None, summarizer=None):
+    """Display search results with entity highlighting, genre prediction, and plot summarization."""
     if not results:
         st.warning("No results found.")
         return
@@ -196,9 +333,21 @@ def display_search_results(results: List[Dict], entities: Dict[str, List[str]] =
                 if 'year' in movie and movie['year']:
                     st.write(f"**Year:** {movie['year']}")
 
-                if 'genre' in movie and movie['genre']:
-                    movie_genres = movie['genre']
+                # Handle genres with prediction for missing ones
+                movie_genres = movie.get('genre', [])
+                genre_text = ""
+                predicted = False
 
+                if not movie_genres or len(movie_genres) == 0:
+                    # Predict genres if missing
+                    if genre_predictor:
+                        with st.spinner("🤖 Predicting genres..."):
+                            predicted_genres = predict_missing_genres(movie, genre_predictor)
+                            if predicted_genres:
+                                movie_genres = predicted_genres
+                                predicted = True
+
+                if movie_genres:
                     # Handle different genre formats
                     if isinstance(movie_genres, list):
                         genre_text = ', '.join(str(g) for g in movie_genres)
@@ -212,11 +361,17 @@ def display_search_results(results: List[Dict], entities: Dict[str, List[str]] =
                         for genre in entities['GENRE']:
                             if genre.lower() in genre_text.lower():
                                 # Use case-insensitive replacement
-                                import re
                                 pattern = re.compile(re.escape(genre), re.IGNORECASE)
                                 genre_text = pattern.sub(f"**{genre}**", genre_text)
 
-                    st.write(f"**Genre:** {genre_text}")
+                    # Add prediction indicator
+                    if predicted:
+                        st.write(f"**Genre:** {genre_text} 🤖")
+                        st.caption("🤖 = AI predicted")
+                    else:
+                        st.write(f"**Genre:** {genre_text}")
+                else:
+                    st.write("**Genre:** Not available")
 
                 if 'director' in movie and movie['director']:
                     director_text = movie['director']
@@ -251,33 +406,65 @@ def display_search_results(results: List[Dict], entities: Dict[str, List[str]] =
                     st.write(f"**Cast:** {cast_text}")
 
             with col2:
-                # Display plot
+                # Display plot with summarization option
                 if 'plot' in movie and movie['plot']:
-                    st.write("**Plot:**")
-                    st.write(movie['plot'])
+                    plot_text = movie['plot']
+
+                    # Show summarization options
+                    col2a, col2b = st.columns([3, 1])
+
+                    with col2a:
+                        st.write("**Plot:**")
+
+                    with col2b:
+                        if summarizer and len(plot_text) > 300:
+                            if st.button(f"📝 Summarize", key=f"summarize_{i}"):
+                                with st.spinner("🤖 Summarizing plot..."):
+                                    summary = summarize_plot(plot_text, summarizer, movie.get('title', ''))
+                                    if summary != plot_text:
+                                        st.session_state[f"summary_{i}"] = summary
+
+                    # Display plot or summary
+                    if f"summary_{i}" in st.session_state:
+                        st.write(st.session_state[f"summary_{i}"])
+                        st.caption("🤖 AI summarized")
+                        if st.button(f"📖 Show full plot", key=f"full_plot_{i}"):
+                            del st.session_state[f"summary_{i}"]
+                            st.rerun()
+                    else:
+                        # Show truncated plot if too long
+                        if len(plot_text) > 500:
+                            st.write(plot_text[:500] + "...")
+                            st.caption("Plot truncated. Use summarize button for AI summary.")
+                        else:
+                            st.write(plot_text)
 
                 # Display wiki link if available
                 if 'wiki_url' in movie and movie['wiki_url']:
-                    st.write(f"[Wiki Page]({movie['wiki_url']})")
+                    st.write(f"[📖 Wiki Page]({movie['wiki_url']})")
 
 
 def main():
     """Main function to run the Streamlit app."""
     st.set_page_config(
-        page_title="Movie Vector Search with NER",
+        page_title="AI-Powered Movie Search",
         page_icon="🎬",
         layout="wide"
     )
 
-    st.title("🎬 Movie Vector Search with NER")
+    st.title("🎬 AI-Powered Movie Search")
     st.write("""
-    Search for movies using natural language queries. This app uses:
-    - **Vector database** for semantic similarity search
-    - **NER (Named Entity Recognition)** to extract and filter by directors, cast, and genres
+    Search for movies using natural language queries. This app uses multiple AI models:
+    - **🔍 Vector database** for semantic similarity search
+    - **🎯 NER (Named Entity Recognition)** to extract and filter by directors, cast, and genres
+    - **🤖 Genre prediction** for movies missing genre information
+    - **📝 Seq2Seq summarization** to create concise, non-spoiler summaries using fine-tuned T5/BART models
     """)
 
-    # Load NER model
+    # Load models
     ner_model = load_ner_model()
+    genre_predictor = load_genre_predictor()
+    summarizer = load_summarizer()
 
     # Sidebar for database operations
     st.sidebar.title("Database Operations")
@@ -381,7 +568,12 @@ def main():
 
                             # Step 4: Display results
                             if results:
-                                display_search_results(results, entities if use_ner_filtering else None)
+                                display_search_results(
+                                    results,
+                                    entities if use_ner_filtering else None,
+                                    genre_predictor,
+                                    summarizer
+                                )
                             else:
                                 st.warning("No results found after filtering. Try a broader query or disable NER filtering.")
                         else:
@@ -389,16 +581,30 @@ def main():
                 else:
                     st.info("Please enter a search query.")
 
-            # NER Model Information
-            st.sidebar.subheader("🎯 NER Model")
+            # AI Models Information
+            st.sidebar.subheader("🤖 AI Models")
+
+            # NER Model
             if ner_model:
                 st.sidebar.success("✓ NER model loaded")
-                st.sidebar.write("**Extracts:**")
-                st.sidebar.write("• Directors")
-                st.sidebar.write("• Cast members")
-                st.sidebar.write("• Genres")
+                st.sidebar.write("**Extracts:** Directors, Cast, Genres")
             else:
                 st.sidebar.error("✗ NER model not available")
+
+            # Genre Predictor
+            if genre_predictor:
+                st.sidebar.success("✓ Genre predictor loaded")
+                st.sidebar.write("**Predicts:** Missing genres")
+            else:
+                st.sidebar.warning("⚠ Genre predictor not available")
+
+            # Seq2Seq Summarizer
+            if summarizer:
+                st.sidebar.success("✓ Seq2Seq summarizer loaded")
+                st.sidebar.write("**Summarizes:** Long movie plots")
+                st.sidebar.write("**Model:** Fine-tuned T5/BART")
+            else:
+                st.sidebar.warning("⚠ Seq2Seq summarizer not available")
 
             # Example queries
             st.sidebar.subheader("💡 Example Queries")
@@ -443,27 +649,66 @@ def main():
                     st.sidebar.line_chart(year_counts.resample('10Y').sum())
 
         except Exception as e:
-            st.error(f"Error loading database: {traceback.format_exc()}")
+            st.error(f"Error loading database: {e}")
     else:
         st.info("Please create a vector database using the sidebar options.")
 
-        # Show NER demo even without database
-        if ner_model:
-            st.subheader("🎯 NER Demo (No Database Required)")
-            st.write("Try the NER entity extraction while the database is being created:")
+        # Show model demos even without database
+        col1, col2 = st.columns(2)
 
-            demo_query = st.text_input(
-                "Test NER extraction:",
-                placeholder="E.g., action movies directed by Christopher Nolan",
-                help="Enter a query to see what entities the NER model can extract"
-            )
+        with col1:
+            # Show NER demo
+            if ner_model:
+                st.subheader("🎯 NER Demo")
+                st.write("Try entity extraction:")
 
-            if demo_query:
-                entities = extract_entities_from_query(demo_query, ner_model)
-                if any(entities.values()):
-                    display_entity_info(entities)
-                else:
-                    st.info("No entities detected in this query.")
+                demo_query = st.text_input(
+                    "Test NER extraction:",
+                    placeholder="E.g., action movies directed by Christopher Nolan",
+                    help="Enter a query to see what entities the NER model can extract"
+                )
+
+                if demo_query:
+                    entities = extract_entities_from_query(demo_query, ner_model)
+                    if any(entities.values()):
+                        display_entity_info(entities)
+                    else:
+                        st.info("No entities detected in this query.")
+
+        with col2:
+            # Show seq2seq summarizer demo
+            if summarizer:
+                st.subheader("📝 Summarizer Demo")
+                st.write("Try plot summarization:")
+
+                demo_plot = st.text_area(
+                    "Test plot summarization:",
+                    placeholder="Enter a movie plot to summarize...",
+                    help="Enter a movie plot to see the seq2seq summarizer in action",
+                    height=100
+                )
+
+                if demo_plot and len(demo_plot) > 50:
+                    if st.button("📝 Generate Summary"):
+                        with st.spinner("🤖 Generating summary..."):
+                            summary = summarize_plot(demo_plot, summarizer, "Demo Movie")
+                            st.write("**Summary:**")
+                            st.write(summary)
+                            st.caption("🤖 Generated by seq2seq model")
+            else:
+                st.subheader("📝 Seq2Seq Model")
+                st.write("No trained seq2seq model found.")
+                st.info("""
+                To use plot summarization:
+                1. Train a seq2seq model using the example script
+                2. The trained model will be automatically loaded
+                """)
+
+                if st.button("📖 View Training Instructions"):
+                    st.code("""
+# Generate training data and train model:
+python seq2seq_summarizer_example.py --generate --train --data movie_data.csv --sample-size 500 --model t5-small --epochs 3
+                    """, language="bash")
 
 if __name__ == "__main__":
     main()
