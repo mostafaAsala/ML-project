@@ -15,15 +15,16 @@ This project implements a comprehensive movie analysis and recommendation system
 2. [Genre Prediction Pipeline](#genre-prediction-pipeline)
 3. [Model Evaluation and Selection](#model-evaluation-and-selection)
 4. [Model Saving and Loading](#model-saving-and-loading)
-5. [LLM Summarization](#llm-summarization)
-6. [Vector Database and Search](#vector-database-and-search)
-7. [Future Enhancements](#future-enhancements)
+5. [Named Entity Recognition (NER)](#named-entity-recognition-ner)
+6. [LLM Summarization](#llm-summarization)
+7. [Vector Database and Search](#vector-database-and-search)
+8. [Future Enhancements](#future-enhancements)
 
 ## Data Exploration and Analysis
 
 The project begins with comprehensive data exploration focusing on movie metadata and patterns across different dimensions:
 
-**Main Files**: 
+**Main Files**:
 [movie_data_exploration.ipynb](movie_data_exploration.ipynb)
 [feature_importance_analysis.py](feature_importance_analysis.py)
 
@@ -207,6 +208,108 @@ evaluator = saver.load_models_into_evaluator('saved_models/movie_genre_predictio
 # Use loaded models for prediction
 best_model = evaluator.best_model
 predictions = best_model.predict(new_data)
+```
+
+## Named Entity Recognition (NER)
+
+The project includes a Named Entity Recognition system for extracting movie-related entities from user text input:
+
+**Tutorial**:
+- [README_ner_trainer.md](README_ner_trainer.md)
+
+**Main Files**:
+- [movie_ner_trainer.py](movie_ner_trainer.py) - NER model training and entity extraction
+- [ner_trainer_example.py](ner_trainer_example.py) - Example usage and demonstrations
+- [test_ner_trainer.py](test_ner_trainer.py) - Test suite for NER functionality
+
+### Features
+
+- **Entity Extraction**: Identifies Directors, Cast members, and Genres from natural language queries
+- **Training Data Generation**: Automatically generates synthetic training data from movie datasets
+- **Custom Model Training**: Train spaCy-based NER models with movie-specific entities
+- **Batch Processing**: Process multiple user queries efficiently
+- **Model Persistence**: Save and load trained NER models
+
+### Entity Types
+
+The NER system recognizes three main entity types:
+
+1. **DIRECTOR**: Movie directors (e.g., "Christopher Nolan", "Quentin Tarantino")
+2. **CAST**: Actors and actresses (e.g., "Leonardo DiCaprio", "Meryl Streep")
+3. **GENRE**: Movie genres (e.g., "action", "comedy", "horror")
+
+### Implementation Details
+
+```python
+from movie_ner_trainer import MovieNERTrainer, train_ner_model
+
+# Train a complete NER model
+model_path = train_ner_model(
+    movie_data_path='wiki_movie_plots_deduped.csv',
+    num_samples=1000,
+    n_iter=30
+)
+
+# Load and use the trained model
+trainer = MovieNERTrainer()
+trainer.load_model(model_path)
+
+# Extract entities from user queries
+text = "I want action movies directed by Christopher Nolan"
+entities = trainer.extract_entities(text)
+print(entities)
+# Output: {'DIRECTOR': ['Christopher Nolan'], 'CAST': [], 'GENRE': ['action']}
+
+# Batch processing
+queries = [
+    "Show me comedy films with Will Smith",
+    "Find horror movies starring Lupita Nyong'o",
+    "I love Quentin Tarantino films"
+]
+results = trainer.predict_batch(queries)
+```
+
+### Training Data Generation
+
+The system includes a `SampleUserRequestGenerator` class that creates realistic training data:
+
+```python
+from movie_ner_trainer import SampleUserRequestGenerator
+
+# Generate training data from movie dataset
+generator = SampleUserRequestGenerator('movie_data.csv')
+samples = generator.generate_training_samples(num_samples=500)
+
+# Each sample contains text and entity annotations
+for text, annotations in samples[:3]:
+    print(f"Text: {text}")
+    print(f"Entities: {annotations['entities']}")
+```
+
+### Sample Results
+
+| User Query | Extracted Entities |
+|------------|-------------------|
+| "I want action movies directed by Christopher Nolan" | DIRECTOR: Christopher Nolan<br>GENRE: action |
+| "Show me comedy films with Will Smith and Kevin Hart" | CAST: Will Smith, Kevin Hart<br>GENRE: comedy |
+| "Find horror movies starring Lupita Nyong'o" | CAST: Lupita Nyong'o<br>GENRE: horror |
+| "I love Quentin Tarantino thriller films" | DIRECTOR: Quentin Tarantino<br>GENRE: thriller |
+
+### Integration with Other Components
+
+The NER system integrates seamlessly with other project components:
+
+```python
+# Extract entities from user query
+entities = ner_trainer.extract_entities("I want sci-fi movies by Denis Villeneuve")
+
+# Use extracted entities with genre predictor
+if entities['GENRE']:
+    genre_predictions = genre_predictor.predict_by_genre(entities['GENRE'])
+
+# Use with vector search
+if entities['DIRECTOR']:
+    similar_movies = vector_db.search(f"movies by {entities['DIRECTOR'][0]}")
 ```
 
 ## LLM Summarization
