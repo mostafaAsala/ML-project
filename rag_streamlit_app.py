@@ -70,7 +70,7 @@ def initialize_rag_system():
     try:
         # Get configuration from session state or use defaults
         llm_provider = st.session_state.get('llm_provider', 'mistral')
-        llm_model = st.session_state.get('llm_model', 'mistral-small')
+        llm_model = st.session_state.get('llm_model', 'mistral-large-latest')
 
         rag_system = MovieRAGSystem(
             llm_provider=llm_provider,
@@ -109,12 +109,12 @@ def setup_sidebar():
 
     # Model selection for Mistral
     model_options = {
-        "mistral": ["mistral-small", "mistral-medium", "mistral-large"]
+        "mistral": ["mistral-large-latest", "mistral-medium", "mistral-large"]
     }
 
     llm_model = st.sidebar.selectbox(
         "Model",
-        model_options.get(llm_provider, ["mistral-small"]),
+        model_options.get(llm_provider, ["mistral-large-latest"]),
         key="llm_model"
     )
 

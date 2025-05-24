@@ -15,28 +15,44 @@ import json
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-import Utils
 from movie_vector_db import MovieVectorDB
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+import dotenv
+dotenv.load_dotenv()
+
+"""
+ALWAYS use this function when users ask for:
+- Movie recommendations (e.g., "good action movies", "best comedies")
+- Movies by genre (e.g., "sci-fi movies", "horror films")
+- Movies by director or actor (e.g., "Christopher Nolan movies", "Tom Hanks films")
+- Specific movie information (e.g., "tell me about Inception")
+- Movie lists or suggestions
+- Any query requiring actual movie data
+DO NOT use this function when user ask for
+- knowledge about previous aquired date
+- more questions about previous conversation"""
 # Function definition for LLM function calling
 MOVIE_SEARCH_FUNCTION = {
     "name": "search_movie_database",
-    "description": "Search the movie database for relevant movies based on user queries. Use this when the user asks about specific movies, genres, directors, actors, or wants movie recommendations.",
+    "description": """MANDATORY: Search the comprehensive movie database to find movies with detailed information including title, year, director, cast, genre, plot, and ratings.
+This function provides complete movie details from the database.""",
     "parameters": {
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
-                "description": "The search query to find relevant movies"
+                "description": "Search query for movies (e.g., 'action movies', 'Christopher Nolan', 'sci-fi 2020', 'best comedies')"
             },
             "num_results": {
                 "type": "integer",
-                "description": "Number of movies to retrieve (default: 5)",
-                "default": 5
+                "description": "Number of movies to retrieve (default: 5, max: 10)",
+                "default": 5,
+                "minimum": 1,
+                "maximum": 10
             }
         },
         "required": ["query"]
@@ -56,7 +72,7 @@ class MovieRAGSystem:
         self,
         vector_db_path: Optional[str] = None,
         llm_provider: str = "mistral",
-        llm_model: str = "mistral-small",
+        llm_model: str = "mistral-large-latest",
         embedding_model: str = "all-MiniLM-L6-v2",
         api_key: Optional[str] = None
     ):
@@ -91,11 +107,10 @@ class MovieRAGSystem:
 
     def _get_api_key(self) -> str:
         """Get Mistral API key from environment variables."""
-        print("00000000000000000000000000000000000000000000000000000000000000000000")
         if self.llm_provider != "mistral":
             raise ValueError("Only Mistral provider is supported")
-        api_key = Utils.mistral_api_key #os.environ.get("MISTRAL_API_KEY")
-        print('api_key: ',api_key )
+
+        api_key = os.environ.get("MISTRAL_API_KEY")
         if not api_key:
             logger.error("MISTRAL_API_KEY environment variable not set")
             raise ValueError("MISTRAL_API_KEY environment variable is required")
@@ -193,7 +208,7 @@ class MovieRAGSystem:
         try:
             if self.llm_provider != "mistral":
                 raise ValueError("Only Mistral provider is supported")
-
+            print(messages)
             return self._call_mistral_with_functions(messages)
         except Exception as e:
             logger.error(f"Error calling Mistral LLM: {e}")
@@ -204,6 +219,9 @@ class MovieRAGSystem:
 
     def _call_mistral_with_functions(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
         """Call Mistral API with function calling."""
+        print("Messages-------------------------------------------------")
+        print(messages)
+        print("Messages End-------------------------------------------------")
         try:
             from mistralai import Mistral
 
@@ -219,19 +237,40 @@ class MovieRAGSystem:
                 "function": MOVIE_SEARCH_FUNCTION
             }]
 
+            # Check if this looks like a movie query to force function calling
+            user_message = messages[-1]["content"].lower() if messages else ""
+            movie_keywords = [
+                "movie", "film", "recommend", "genre", "director", "actor", "actress",
+                "action", "comedy", "drama", "horror", "sci-fi", "thriller", "romance",
+                "best", "good", "watch", "cinema", "plot", "cast", "year"
+            ]
+
+            # Force function calling for movie-related queries
+            is_movie_query = any(keyword in user_message for keyword in movie_keywords)
+            tool_choice = "any" if is_movie_query else "auto"
+
+            logger.info(f"Query: '{user_message[:50]}...' | Movie query: {is_movie_query} | Tool choice: {tool_choice}")
+
+            print("aa-------------------------------------------------")
+            print(tools)
+            print("aa-------------------------------------------------")
             response = client.chat.complete(
                 model=self.llm_model,
                 messages=messages,
                 tools=tools,
-                tool_choice="auto",
-                temperature=0.7
+                tool_choice=tool_choice,
+                temperature=0.3  # Lower temperature for more consistent function calling
             )
 
             message = response.choices[0].message
+            print("aa-------------------------------------------------")
+            print(response)
+            print("aa-------------------------------------------------")
 
             result = {
                 "content": message.content or "",
-                "function_calls": []
+                "function_calls": [],
+                "original_tool_calls": []  # Store original tool call objects
             }
 
             if message.tool_calls:
@@ -241,6 +280,8 @@ class MovieRAGSystem:
                             "name": tool_call.function.name,
                             "arguments": json.loads(tool_call.function.arguments)
                         })
+                        # Store the original tool call object for proper message formatting
+                        result["original_tool_calls"].append(tool_call)
 
             return result
 
@@ -298,15 +339,25 @@ class MovieRAGSystem:
         """
         messages = [{
             "role": "system",
-            "content": """You are a knowledgeable movie expert assistant. You help users find information about movies, provide recommendations, and answer questions.
+            "content": """You are a movie expert assistant with access to a comprehensive movie database. Your primary job is to help users find movies and provide movie information.
 
-When users ask about specific movies, genres, directors, actors, or want recommendations, use the search_movie_database function to find relevant information from the movie database.
+            CRITICAL RULES:
+            1. ALWAYS use the search_movie_database function for ANY movie-related query
+            2. NEVER try to answer movie questions from memory - always search the database first
+            3. Use the function for: recommendations, movie lists, genre searches, director/actor queries, specific movie info
+            3. If user ask movies in messages, use the data from the messages.
 
-For general conversation, greetings, or questions that don't require movie data, respond directly without using the function.
+            Examples that REQUIRE the function:
+            - "What are good action movies?" → search_movie_database(query="action movies")
+            - "Movies by Christopher Nolan" → search_movie_database(query="Christopher Nolan")
+            - "Best sci-fi films" → search_movie_database(query="sci-fi movies")
+            - "Tell me about Inception" → search_movie_database(query="Inception")
 
-Be conversational, helpful, and provide detailed responses based on the information you find."""
+            Only respond without the function for: greetings, thanks, general conversation unrelated to movies.
+
+            After getting search results, provide detailed, helpful responses based on the actual data from the database."""
         }]
-
+        """"""
         # Add conversation history
         for turn in self.conversation_history:
             messages.append({"role": "user", "content": turn["user_message"]})
@@ -316,6 +367,17 @@ Be conversational, helpful, and provide detailed responses based on the informat
         messages.append({"role": "user", "content": user_query})
 
         return messages
+
+    def _is_movie_query(self, query: str) -> bool:
+        """Determine if a query is movie-related."""
+        query_lower = query.lower()
+        movie_keywords = [
+            "movie", "film", "recommend", "genre", "director", "actor", "actress",
+            "action", "comedy", "drama", "horror", "sci-fi", "thriller", "romance",
+            "best", "good", "watch", "cinema", "plot", "cast", "year", "netflix",
+            "imdb", "oscar", "award", "blockbuster", "sequel", "franchise"
+        ]
+        return any(keyword in query_lower for keyword in movie_keywords)
 
     def ask(self, user_query: str) -> Dict[str, Any]:
         """
@@ -336,6 +398,16 @@ Be conversational, helpful, and provide detailed responses based on the informat
             # Call LLM with function calling
             llm_response = self._call_llm_with_functions(messages)
 
+            # Check if this was a movie query that should have triggered function calling
+            is_movie_query = self._is_movie_query(user_query)
+            print("-------------------------------------------------------------------------------")
+            print("-------------------------------------------------------------------------------")
+            print("Functions: ",llm_response["function_calls"])
+
+            print("-------------------------------------------------------------------------------")
+            print("Is movie query: ",llm_response)
+
+            print("-------------------------------------------------------------------------------")
             # Execute any function calls
             function_results = []
             if llm_response["function_calls"]:
@@ -343,22 +415,69 @@ Be conversational, helpful, and provide detailed responses based on the informat
 
                 # If functions were called, make a second LLM call with results
                 if function_results:
-                    # Add function results to messages
+                    # First, add the assistant's response with tool calls to messages
+                    assistant_message = {
+                        "role": "assistant",
+                        "content": llm_response["content"] or ""
+                    }
+
+                    # Add tool calls to the assistant message if we have the original tool calls
+                    if "original_tool_calls" in llm_response and llm_response["original_tool_calls"]:
+                        assistant_message["tool_calls"] = llm_response["original_tool_calls"]
+
+                    messages.append(assistant_message)
+
+                    # Then add function results to messages
                     for func_result in function_results:
                         function_message = {
-                            "role": "function",
+                            "role": "tool",
+                            #"tool_call_id": func_result['id'],
                             "name": func_result["function_name"],
                             "content": json.dumps(func_result["result"][:3])  # Limit to top 3 results
                         }
+                        
+                        print("f-------------------------------------------------------------------------------")
+                        print("Function message: ",func_result)
+                        print("f-------------------------------------------------------------------------------")
                         messages.append(function_message)
-
+                    #messages.append({"role": "user", "content": "summarize the previous message."})
                     # Get final response with function results
                     final_response = self._call_llm_with_functions(messages)
                     response_text = final_response["content"]
                 else:
                     response_text = llm_response["content"]
             else:
-                response_text = llm_response["content"]
+                # If no function was called but this was a movie query, force a search
+                if is_movie_query and False:
+                    logger.warning(f"Movie query detected but no function called. Forcing search for: {user_query}")
+
+                    # Force a database search
+                    forced_results = self._search_movie_database(user_query, 5)
+                    function_results = [{
+                        "function_name": "search_movie_database",
+                        "arguments": {"query": user_query, "num_results": 5},
+                        "result": forced_results
+                    }]
+
+                    # Add forced function result to messages
+                    function_message = {
+                        "role": "function",
+                        "name": "search_movie_database",
+                        "content": json.dumps(forced_results[:3])
+                    }
+                    messages.append(function_message)
+
+                    # Get response with the forced search results
+                    final_response = self._call_llm_with_functions(messages)
+                    response_text = final_response["content"]
+
+                    # Update the function calls list to reflect what actually happened
+                    llm_response["function_calls"] = [{
+                        "name": "search_movie_database",
+                        "arguments": {"query": user_query, "num_results": 5}
+                    }]
+                else:
+                    response_text = llm_response["content"]
 
             # Prepare result
             result = {
@@ -445,7 +564,7 @@ if __name__ == "__main__":
     # Initialize the RAG system
     rag_system = MovieRAGSystem(
         llm_provider="mistral",
-        llm_model="mistral-small"
+        llm_model="mistral-large-latest"
     )
 
     # Load vector database (if available)
