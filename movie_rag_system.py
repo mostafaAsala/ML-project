@@ -247,13 +247,10 @@ class MovieRAGSystem:
 
             # Force function calling for movie-related queries
             is_movie_query = any(keyword in user_message for keyword in movie_keywords)
-            tool_choice = "any" if is_movie_query else "auto"
+            tool_choice = "auto"#"any" if is_movie_query else "auto"
 
             logger.info(f"Query: '{user_message[:50]}...' | Movie query: {is_movie_query} | Tool choice: {tool_choice}")
 
-            print("aa-------------------------------------------------")
-            print(tools)
-            print("aa-------------------------------------------------")
             response = client.chat.complete(
                 model=self.llm_model,
                 messages=messages,
@@ -263,9 +260,9 @@ class MovieRAGSystem:
             )
 
             message = response.choices[0].message
-            print("aa-------------------------------------------------")
+            print("Response-------------------------------------------------")
             print(response)
-            print("aa-------------------------------------------------")
+            print("Response End-------------------------------------------------")
 
             result = {
                 "content": message.content or "",
@@ -400,14 +397,6 @@ class MovieRAGSystem:
 
             # Check if this was a movie query that should have triggered function calling
             is_movie_query = self._is_movie_query(user_query)
-            print("-------------------------------------------------------------------------------")
-            print("-------------------------------------------------------------------------------")
-            print("Functions: ",llm_response["function_calls"])
-
-            print("-------------------------------------------------------------------------------")
-            print("Is movie query: ",llm_response)
-
-            print("-------------------------------------------------------------------------------")
             # Execute any function calls
             function_results = []
             if llm_response["function_calls"]:
@@ -426,22 +415,26 @@ class MovieRAGSystem:
                         assistant_message["tool_calls"] = llm_response["original_tool_calls"]
 
                     messages.append(assistant_message)
-
+                    
+                    print("\ntool_calls--------------------------------------------------------")
+                    print(assistant_message["tool_calls"])
+                    print("tool_calls End--------------------------------------------------------\n")
                     # Then add function results to messages
                     for func_result in function_results:
                         function_message = {
                             "role": "tool",
-                            #"tool_call_id": func_result['id'],
+                            "id": assistant_message['tool_calls'][-1].id,
+                            "tool_call_id": assistant_message['tool_calls'][-1].id,
                             "name": func_result["function_name"],
                             "content": json.dumps(func_result["result"][:3])  # Limit to top 3 results
                         }
                         
-                        print("f-------------------------------------------------------------------------------")
-                        print("Function message: ",func_result)
-                        print("f-------------------------------------------------------------------------------")
                         messages.append(function_message)
-                    #messages.append({"role": "user", "content": "summarize the previous message."})
-                    # Get final response with function results
+                    
+                    print("\nMessages-------------------------------------------------")
+                    print(messages)
+                    print("Messages End-------------------------------------------------\n")
+
                     final_response = self._call_llm_with_functions(messages)
                     response_text = final_response["content"]
                 else:
