@@ -133,7 +133,7 @@ class MovieVectorDB:
         if 'plot' in df.columns:
             df['text_for_embedding'] = df.apply(
                 lambda row: f"The movie titled '{row['title']}' was directed by {row['director']}. "
-                f"It falls under the '{row['genre']}' genre and was released in {row['year']}. "
+                f"It falls under the '{row['genre']}' genres and was released in {row['year']}. "
                 f"Plot summary: {row['plot'][:1000]}"   ,  # Limit plot length
                 axis=1
             )
